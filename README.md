@@ -8,8 +8,12 @@ A very easy to use framework for delay dynamical system
 Python 2.4 or higher
 weave for python 2.4 or higher
 
-# install weave using :  pip install weave 
+# install weave using : 
 
-# install the package using :  python setup.py install
+pip install weave 
 
-#  enjoy !!
+# install pydelay using 
+
+python setup.py install
+
+ enjoy !!
