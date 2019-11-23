@@ -1,21 +1,36 @@
 #!/usr/bin/env python
 from __future__ import division
+from scipy.interpolate import splrep, splev, spalde
+import weave
+import numpy as np
+from helper import _parenthesis_balancedQ, _symbols_allowedQ,\
+    gen_disconts, gwn_code, assure_array, isrealnum, isnum
+
+
+import re
+import time
+import hashlib
+import sys
+import math
+import warnings
+warnings.filterwarnings(action='ignore',
+                        message='BaseException.message has been deprecated')
 
 # MIT/X Consortium License
 #
 # pydelay, A tool for solving delay differential equations.
 # Copyright (C) 2009  Valentin Flunkert
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,20 +39,6 @@ from __future__ import division
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import warnings
-warnings.filterwarnings(action = 'ignore',
-                        message = 'BaseException.message has been deprecated')
-
-import numpy as np
-from scipy import weave
-from scipy.interpolate import splrep, splev, spalde
-import math
-import sys
-import hashlib
-import time
-import re
-from helper import _parenthesis_balancedQ, _symbols_allowedQ,\
-        gen_disconts, gwn_code, assure_array, isrealnum, isnum
 
 class dde23:
     """This class translates a DDE to C and solves it using the Bogacki-Shampine method.
@@ -109,8 +110,8 @@ class dde23:
         Dictionary of numpy-type names of each variable.
     """
 
-    def __init__(self, eqns, params=None, noise=None, 
-            supportcode = '', debug=False):
+    def __init__(self, eqns, params=None, noise=None,
+                 supportcode='', debug=False):
         """Initialise the solver.
 
         `eqns`  
@@ -168,14 +169,15 @@ class dde23:
         self.eqns = eqns     # the equations
         if params == None:
             params = {}
-        self.params = params # the parameters for the equations
+        self.params = params  # the parameters for the equations
         if noise == None:
             noise = {}
-        self.noise = noise   
+        self.noise = noise
         self.supportcode = supportcode
         self.debug = debug
-        self.rseed = int(str(int(time.time()*10))[3:]) # generate a random seed from the time
-        self.delayhashs = [] # the md5 hash values of the delay terms
+        # generate a random seed from the time
+        self.rseed = int(str(int(time.time()*10))[3:])
+        self.delayhashs = []  # the md5 hash values of the delay terms
         self.code = ''       # the generated c code
         self.code_manu = ''  # the generated standalone c code (ifdef MANUAL)
         self.vars = []
@@ -187,11 +189,11 @@ class dde23:
         self.sol = {}        # the solutions
         self.hist = {}       # the history
         self.Vhist = {}      # the time derivative of the history
-        self.spline_tck = {} # stores the tck spline representation of the solutions
+        self.spline_tck = {}  # stores the tck spline representation of the solutions
         self.chunk = 10000   # grow arrays by this number if too small
         self._maxdelay = 1
         self._update()
-        self.__hist_set = False #history has been set for at least one variable
+        self.__hist_set = False  # history has been set for at least one variable
         # initialise the histories to zero
         maxdelay = self._maxdelay
         nn = 101
@@ -202,11 +204,11 @@ class dde23:
         """initialize the history of all variables to zero arrays of len nn.
         The time history is not set."""
         for var in self.vars:
-            self.hist[var]  = np.zeros(nn) 
+            self.hist[var] = np.zeros(nn)
             self.Vhist[var] = np.zeros(nn)
             if self.types[var] == 'Complex':
                 self.hist[var] = self.hist[var] + 0.0j
-                self.Vhist[var] = self.Vhist[var] + 0.0j 
+                self.Vhist[var] = self.Vhist[var] + 0.0j
         self._nstart = nn-1
 
     def _update(self):
@@ -221,13 +223,13 @@ class dde23:
                     vname, vartype = vardef.split(':')
                 except:
                     raise AssertionError,\
-                            '%s is not a valid variable definition. Use "varname" or "varname:C"'%vardef
+                        '%s is not a valid variable definition. Use "varname" or "varname:C"' % vardef
                 if vartype in ['C', 'c']:
                     self.nptypes[vname] = 'NPY_CDOUBLE'
                     self.types[vname] = 'Complex'
                 else:
                     raise AssertionError,\
-                            'Unknown type in variable definition "%s"'%vardef
+                        'Unknown type in variable definition "%s"' % vardef
                 self.vars.append(vname)
             else:
                 self.types[vardef] = 'double'
@@ -238,17 +240,17 @@ class dde23:
             var = vardef.split(':')[0]
             eq = self.eqns[vardef]
             assert _symbols_allowedQ(eq), \
-                    r"""Forbidden symbol in eqn for %s:
+                r"""Forbidden symbol in eqn for %s:
 
                     %s
 
                     Forbidden symbols are: ** ^ { } [ ] & # ! @ %% ? ; > < | \
-                    """%(var, eq)
+                    """ % (var, eq)
             assert _parenthesis_balancedQ(eq), \
-                    """Eqn for %s has unbalanced parenthesis:
+                """Eqn for %s has unbalanced parenthesis:
 
                     %s
-                    """%(var, eq)
+                    """ % (var, eq)
 
         self._check_simul_pars()
         self._check_params()
@@ -260,34 +262,40 @@ class dde23:
             var = vardef.split(':')[0]
             eqn = self.eqns[vardef]
             funcsymbols = ['sin(', 'cos(', 'tan(', 'asin(', 'acos(', 'atan(', 'atan2(', 'cosh(',
-                    'sinh(', 'exp(', 'abs(', 'fabs(', 'tan(', 'conj(', 'real(', 'imag(', 'tanh(', 
-                    'log(', 'pow(', 'sqrt(', 'ceil(', 'floor(', 'log10(']    
+                           'sinh(', 'exp(', 'abs(', 'fabs(', 'tan(', 'conj(', 'real(', 'imag(', 'tanh(',
+                           'log(', 'pow(', 'sqrt(', 'ceil(', 'floor(', 'log10(']
 
-            symbols = ['t','ii','Heavi('] + self.params.keys() + self.vars + funcsymbols + ['%s('%var for var in self.vars]
+            symbols = ['t', 'ii', 'Heavi('] + self.params.keys(
+            ) + self.vars + funcsymbols + ['%s(' % var for var in self.vars]
             symbpattern = r'([a-zA-Z]+\w*[\(]{0,1})'
             res = re.findall(symbpattern, eqn)
             for match in res:
                 if self.supportcode == '':
-                    assert match in symbols, "Undefined string '%s' in eqn for '%s':\n\n%s\n"%(match, var, eqn)
+                    assert match in symbols, "Undefined string '%s' in eqn for '%s':\n\n%s\n" % (
+                        match, var, eqn)
                 else:
                     if match not in symbols and match not in self.supportcode:
-                        sys.stderr.write("Warning: Suspicious string '%s' in eqn for '%s':\n\n%s\nIs this a function defined in your supportcode?\n"%(match, var, eqn))
+                        sys.stderr.write(
+                            "Warning: Suspicious string '%s' in eqn for '%s':\n\n%s\nIs this a function defined in your supportcode?\n" % (match, var, eqn))
 
     def _check_simul_pars(self):
         for key, value in zip(self.simul, self.simul.values()):
             assert key in ['AbsTol', 'RelTol', 'dtmin', 'dtmax', 'dt0', 'MaxIter', 'tfinal'],\
-                    "'%s' is not a valid simulation parameter"%key
+                "'%s' is not a valid simulation parameter" % key
             assert isrealnum(value), \
-                 "'%s' is set to '%s', has to be a positive number"%(key, value)
-            assert value > 0, "'%s' is set to '%s', has to be a positive number"%(key, value)
+                "'%s' is set to '%s', has to be a positive number" % (
+                    key, value)
+            assert value > 0, "'%s' is set to '%s', has to be a positive number" % (
+                key, value)
 
     def _check_params(self):
         for key, value in zip(self.params, self.params.values()):
             assert isnum(value), \
-                 "The parameter '%s' is set to '%s'. All parameters have to be numbers."%(key, value)
+                "The parameter '%s' is set to '%s'. All parameters have to be numbers." % (
+                    key, value)
 
-    def set_sim_params(self, tfinal=100, AbsTol=1e-6, RelTol=1e-3, 
-            dtmin=1e-6, dtmax=None, dt0=None, MaxIter=1e9):
+    def set_sim_params(self, tfinal=100, AbsTol=1e-6, RelTol=1e-3,
+                       dtmin=1e-6, dtmax=None, dt0=None, MaxIter=1e9):
         """
         `tfinal` 
             End time of the simulation (the simulation always starts at ``t=0``).
@@ -307,14 +315,14 @@ class dde23:
             maximum number of steps. The simulation stops if this is reached.
         """
         if dtmax != None and dtmax < 0.9*self._mindelay:
-            self.simul['dtmax']  = dtmax
+            self.simul['dtmax'] = dtmax
         else:
-            self.simul['dtmax']  = min([tfinal/50.0, self._mindelay*0.9])
+            self.simul['dtmax'] = min([tfinal/50.0, self._mindelay*0.9])
         if dt0 != None:
-            self.simul['dt0']  = dt0
+            self.simul['dt0'] = dt0
         else:
-            self.simul['dt0']  = dtmin
-        self.simul['dtmin']  = dtmin
+            self.simul['dt0'] = dtmin
+        self.simul['dtmin'] = dtmin
         self.simul['AbsTol'] = AbsTol
         self.simul['RelTol'] = RelTol
         order = 3
@@ -329,7 +337,7 @@ class dde23:
             discont = np.append(discont, tfinal)
         self.discont = discont
 
-        self.simul['tfinal']   = tfinal
+        self.simul['tfinal'] = tfinal
         self.simul['MaxIter'] = MaxIter
 
         self._update()
@@ -339,7 +347,6 @@ class dde23:
         which takes a dictionary of arrays."""
         assert False, """This function has been replaced by hist_from_arrays (with an s) \
                 which takes a dictionary of arrays."""
-
 
     def hist_from_funcs(self, dic, nn=101):
         """
@@ -368,14 +375,14 @@ class dde23:
 
             dde.hist_from_funcs(histdic, 500)
         """
-        #TODO assert dic and not function
+        # TODO assert dic and not function
         maxdelay = self._maxdelay
-        t = np.linspace(-maxdelay, 0, nn, endpoint=True) 
-        
+        t = np.linspace(-maxdelay, 0, nn, endpoint=True)
+
         for key in dic:
             if key not in self.vars:
                 sys.stderr.write('Warning: The key %s in the history dictionary is not a variable name.\
-                        It will be ignored.\n'%key)
+                        It will be ignored.\n' % key)
 
         arraydic = {'t': t}
         for key in dic:
@@ -389,7 +396,6 @@ class dde23:
         which takes a dictionary of functions."""
         assert False, """This function has been replaced by hist_from_funcs (with an s)\
                 which takes a dictionary of functions."""
-
 
     def hist_from_array(self, *args):
         """This function has been replaced by hist_from_arrays (with an s) which takes a dictionary
@@ -416,7 +422,7 @@ class dde23:
         entries are ignored and a warning is printed.
 
         Example:::
-            
+
             t = numpy.linspace(0, 1, 500)
             x = numpy.cos(0.2*t)
             y = numpy.sin(0.2*t)
@@ -430,7 +436,8 @@ class dde23:
 
         """
         if self.__hist_set:
-            sys.stderr.write("Warning: The history has already been set. It will be overwritten.\n")
+            sys.stderr.write(
+                "Warning: The history has already been set. It will be overwritten.\n")
         self.__hist_set = True
 
         maxdelay = self._maxdelay
@@ -440,7 +447,7 @@ class dde23:
         laengen = map(len, dic.values())
         laengen.sort()
         assert laengen[0] == laengen[-1],\
-                'Error: not all arrays in dic have the same length'
+            'Error: not all arrays in dic have the same length'
 
         if 't' in dic:
             t = assure_array(dic['t']).copy()
@@ -450,14 +457,14 @@ class dde23:
             nn = laengen[0]
             t = np.linspace(-maxdelay, 0, nn, endpoint=True)
         assert t[0] <= -maxdelay,\
-            ('Error: The history has to reach back at least to the maximum delay %s.'%maxdelay +
-             'The time array you gave spans [%s, %s]'%(t[0], t[-1]))
+            ('Error: The history has to reach back at least to the maximum delay %s.' % maxdelay +
+             'The time array you gave spans [%s, %s]' % (t[0], t[-1]))
         assert t[-1] >= 0, ('Error: The history has to reach up to t=0.' +
-            'The time array you gave spans [%s, %s]'%(t[0], t[-1]))
+                            'The time array you gave spans [%s, %s]' % (t[0], t[-1]))
 
         # only copy the data that are needed
         delta = 0.001
-        indices = (-maxdelay <= t) * (t<=0)
+        indices = (-maxdelay <= t) * (t <= 0)
         t = t[indices]
         nn = len(t)
 
@@ -469,7 +476,7 @@ class dde23:
         for key in dic:
             if key != 't' and key not in self.vars:
                 sys.stderr.write('Warning: The key %s in the history dictionary is not a variable name.\
-                            It will be ignored.\n'%key)
+                            It will be ignored.\n' % key)
 
         for var in self.vars:
             if var in dic:
@@ -477,18 +484,21 @@ class dde23:
                     y = assure_array(dic[var])[indices]+0.0j
                     tck_real = splrep(t, y.real)
                     tck_imag = splrep(t, y.imag)
-                    self.hist[var] = splev(tsample, tck_real) + 1.0j*splev(tsample, tck_imag)
-                    self.Vhist[var] = splev(tsample, tck_real, der=1) + 1.0j*splev(tsample, tck_imag, der=1)
+                    self.hist[var] = splev(
+                        tsample, tck_real) + 1.0j*splev(tsample, tck_imag)
+                    self.Vhist[var] = splev(
+                        tsample, tck_real, der=1) + 1.0j*splev(tsample, tck_imag, der=1)
                 else:
                     y = assure_array(dic[var])[indices]
                     tck = splrep(t, y)
                     self.hist[var] = splev(tsample, tck)
                     self.Vhist[var] = splev(tsample, tck, der=1)
             else:
-                sys.stderr.write('History for %s not given. Will be set to zero.\n'%var)
+                sys.stderr.write(
+                    'History for %s not given. Will be set to zero.\n' % var)
                 if self.types[var] == 'Complex':
-                    self.hist[var] = np.zeros(nn+1) +0.0j
-                    self.Vhist[var] = np.zeros(nn+1) +0.0j
+                    self.hist[var] = np.zeros(nn+1) + 0.0j
+                    self.Vhist[var] = np.zeros(nn+1) + 0.0j
                 else:
                     self.hist[var] = np.zeros(nn+1)
                     self.Vhist[var] = np.zeros(nn+1)
@@ -497,35 +507,35 @@ class dde23:
     def _generate_code(self):
         """Generate the c code.
         The code is stored in 
-           
+
         self.code and self.includes
 
         """
 
-        ## These two functions are called by re.sub:
+        # These two functions are called by re.sub:
         # replace the delay terms by the appropriate function call
         def repldelay(matchobj):
             var = matchobj.group(1)
             delay = matchobj.group(2)
             s = delay
             for par in self.params:
-                s=s.replace('PAR%s'%par, str(self.params[par]))
+                s = s.replace('PAR%s' % par, str(self.params[par]))
             try:
                 delval = -eval(s)
             except:
                 raise AssertionError, """Error: The delay term "%s" is an undefined expression. 
-                (State and time dependent delays are not yet supported.)"""%delay
-            assert delval >= 0, 'Error: The delay term  "%s" is in the future.'%delay
+                (State and time dependent delays are not yet supported.)""" % delay
+            assert delval >= 0, 'Error: The delay term  "%s" is in the future.' % delay
 
             if delval > 0:
                 dhash = hashlib.md5(delay).hexdigest()
                 self.delayhashs.append(dhash)
                 self.delays.append(delval)
-                return 'interp_%(var)s(t %(delay)s, &n_%(dhash)s) '%locals()
+                return 'interp_%(var)s(t %(delay)s, &n_%(dhash)s) ' % locals()
             else:
-                return ' %(var)s '%locals()
+                return ' %(var)s ' % locals()
 
-        #replace the derivative delay terms ...
+        # replace the derivative delay terms ...
         def Vrepldelay(matchobj):
             var = matchobj.group(1)
             delay = matchobj.group(2)
@@ -533,23 +543,23 @@ class dde23:
             self.delayhashs.append(dhash)
             s = delay
             for par in self.params:
-                s=s.replace('PAR%s'%par, str(self.params[par]))
+                s = s.replace('PAR%s' % par, str(self.params[par]))
             try:
                 delval = -eval(s)
             except:
                 raise AssertionError, """Error: The delay term "%s" is an undefined expression. 
-                (State and time dependent delays are not yet supported.)"""%delay
+                (State and time dependent delays are not yet supported.)""" % delay
             assert delval > 0, """Error: The delay term  "%s" is in the future. 
-            Or the eqn involves a derivative term without delay."""%delay
+            Or the eqn involves a derivative term without delay.""" % delay
             self.delays.append(delval)
             dhash = hashlib.md5(delay).hexdigest()
             self.delayhashs.append(dhash)
-            return 'interp_%(var)s(t %(delay)s, &n_%(dhash)s)'%locals()
+            return 'interp_%(var)s(t %(delay)s, &n_%(dhash)s)' % locals()
 
         # generate the C equations
 
-        # TODO: to speed things up 
-        # - first collect all delay terms, then check the delays and build replace patterns 
+        # TODO: to speed things up
+        # - first collect all delay terms, then check the delays and build replace patterns
         #   for each delay and go through
 
         eqnkeys = [key.split(':')[0] for key in self.eqns]
@@ -566,20 +576,20 @@ class dde23:
         CNOISEline = ';'.join(noisevals)
 
         for prm in self.params:
-            compiled_pattern = re.compile(r'\b%s\b'%prm)
-            CEQNSk1line = compiled_pattern.sub(r' PAR%s '%prm, CEQNSk1line)
-            CEQNSk2line = compiled_pattern.sub(r' PAR%s '%prm, CEQNSk2line)
-            CEQNSk3line = compiled_pattern.sub(r' PAR%s '%prm, CEQNSk3line)
-            CEQNSk4line = compiled_pattern.sub(r' PAR%s '%prm, CEQNSk4line)
-            CNOISEline  = compiled_pattern.sub(r' PAR%s '%prm, CNOISEline)
+            compiled_pattern = re.compile(r'\b%s\b' % prm)
+            CEQNSk1line = compiled_pattern.sub(r' PAR%s ' % prm, CEQNSk1line)
+            CEQNSk2line = compiled_pattern.sub(r' PAR%s ' % prm, CEQNSk2line)
+            CEQNSk3line = compiled_pattern.sub(r' PAR%s ' % prm, CEQNSk3line)
+            CEQNSk4line = compiled_pattern.sub(r' PAR%s ' % prm, CEQNSk4line)
+            CNOISEline = compiled_pattern.sub(r' PAR%s ' % prm, CNOISEline)
 
         for v in self.vars:
-            compiled_pattern = re.compile(r'\b(%s)\s*\(\s*t\s*(.*?)\s*\)'%v)
+            compiled_pattern = re.compile(r'\b(%s)\s*\(\s*t\s*(.*?)\s*\)' % v)
             CEQNSk1line = compiled_pattern.sub(repldelay, CEQNSk1line)
             CEQNSk2line = compiled_pattern.sub(repldelay, CEQNSk2line)
             CEQNSk3line = compiled_pattern.sub(repldelay, CEQNSk3line)
             CEQNSk4line = compiled_pattern.sub(repldelay, CEQNSk4line)
-            CNOISEline  = compiled_pattern.sub(repldelay, CNOISEline)
+            CNOISEline = compiled_pattern.sub(repldelay, CNOISEline)
 
 #            compiled_pattern = re.compile(r"\b(%s)'\s*\(\s*t\s*(.*?)\s*\)"%v)
 #            CEQNSk1line = compiled_pattern.sub(Vrepldelay, CEQNSk1line)
@@ -587,19 +597,23 @@ class dde23:
 #            CEQNSk3line = compiled_pattern.sub(Vrepldelay, CEQNSk3line)
 #            CEQNSk4line = compiled_pattern.sub(Vrepldelay, CEQNSk4line)
 #            CNOISEline  = compiled_pattern.sub(Vrepldelay, CNOISEline)
-            
-            compiled_pattern = re.compile(r'\b%s\b'%v)
-            CEQNSk1line = compiled_pattern.sub(r' pt_%s_ar[SIM_n] '%v, CEQNSk1line)
-            CEQNSk2line = compiled_pattern.sub(r' (pt_%s_ar[SIM_n] + 0.5 * dt * k1%s) '%(v,v), CEQNSk2line)
-            CEQNSk3line = compiled_pattern.sub(r' (pt_%s_ar[SIM_n] + 0.75 * dt * k2%s) '%(v,v), CEQNSk3line)
-            CEQNSk4line = compiled_pattern.sub(r' TEMP%s '%v, CEQNSk4line)
-            CNOISEline  = compiled_pattern.sub(r' pt_%s_ar[SIM_n] '%v, CNOISEline)
+
+            compiled_pattern = re.compile(r'\b%s\b' % v)
+            CEQNSk1line = compiled_pattern.sub(
+                r' pt_%s_ar[SIM_n] ' % v, CEQNSk1line)
+            CEQNSk2line = compiled_pattern.sub(
+                r' (pt_%s_ar[SIM_n] + 0.5 * dt * k1%s) ' % (v, v), CEQNSk2line)
+            CEQNSk3line = compiled_pattern.sub(
+                r' (pt_%s_ar[SIM_n] + 0.75 * dt * k2%s) ' % (v, v), CEQNSk3line)
+            CEQNSk4line = compiled_pattern.sub(r' TEMP%s ' % v, CEQNSk4line)
+            CNOISEline = compiled_pattern.sub(
+                r' pt_%s_ar[SIM_n] ' % v, CNOISEline)
 
         CEQNSk1 = dict(zip(eqnkeys, CEQNSk1line.split(';')))
         CEQNSk2 = dict(zip(eqnkeys, CEQNSk2line.split(';')))
         CEQNSk3 = dict(zip(eqnkeys, CEQNSk3line.split(';')))
         CEQNSk4 = dict(zip(eqnkeys, CEQNSk4line.split(';')))
-        CNOISE  = dict(zip(noisekeys, CNOISEline.split(';')))
+        CNOISE = dict(zip(noisekeys, CNOISEline.split(';')))
 
         self.delayhashs = list(set(self.delayhashs))
         self.delays = list(set(self.delays))
@@ -610,11 +624,10 @@ class dde23:
             self._maxdelay = 5.0
             self._mindelay = 5.0
 
-
         code = ""
 
         code_manu_1 =\
-        """
+            """
 int main()
 {
 int RSEED = 12345;
@@ -634,12 +647,13 @@ double discont[4] = {maxdelay, 2*maxdelay, 3*maxdelay, tfinal};
 
         for par in self.params:
             if 'complex' in str(type(self.params[par])):
-                code_manu_1 += "Complex PAR%s = %s;\n"%(par, self.params[par])
+                code_manu_1 += "Complex PAR%s = %s;\n" % (
+                    par, self.params[par])
             else:
-                code_manu_1 += "double PAR%s = %s;\n"%(par, self.params[par])
+                code_manu_1 += "double PAR%s = %s;\n" % (par, self.params[par])
 
         code +=\
-        """
+            """
 #ifdef MANUAL
 /* include "code_manu_1.cpp" */
 %CODE_MANU_1%
@@ -661,36 +675,34 @@ srand((unsigned)RSEED);
 """
 
         for dhash in self.delayhashs:
-            code += 'n_%s = SIM_n;\n'%dhash
+            code += 'n_%s = SIM_n;\n' % dhash
 
         for var in self.vars:
             code +=\
-            """
+                """
 
 pt_%(var)s_ar  = (%(type)s*) malloc((SIM_n+chunk) * sizeof(%(type)s));
 pt_%(var)s_Var = (%(type)s*) malloc((SIM_n+chunk) * sizeof(%(type)s));
 
-            """%{'var': var, 'type': self.types[var]}
+            """ % {'var': var, 'type': self.types[var]}
 
         code +=\
-        """
+            """
 pt_t_ar = (double *) malloc((SIM_n+chunk) * sizeof(double));
 
 #ifndef MANUAL
         """
 
-
-
         for var in self.vars:
             code +=\
-            """
+                """
 for(i = 0; i < nstart+1; i++) {
     pt_%(var)s_ar[i]  = hist%(var)s_ar[i];
     pt_%(var)s_Var[i] = Vhist%(var)s_ar[i];
 }
-            """%{'var': var, 'type': self.types[var]}
+            """ % {'var': var, 'type': self.types[var]}
 
-        code +="""
+        code += """
 for(i = 0; i < nstart+1; i++) 
     pt_t_ar[i] = Thist_ar[i];
 #else
@@ -699,7 +711,7 @@ for(i = 0; i < nstart+1; i++)
 #endif
 """
 
-        code_manu_2 ="""
+        code_manu_2 = """
 for(i = 0; i < nstart+1; i++) 
     pt_t_ar[i]  = -maxdelay*(nstart-i)/nstart; 
 
@@ -708,24 +720,24 @@ for(i = 0; i < nstart+1; i++)
 
         for var in self.vars:
             code_manu_2 +=\
-            """ 
+                """ 
 for(i = 0; i < nstart+1; i++) {
     pt_%(var)s_ar[i]  = 0.2; // history value for the variable
     pt_%(var)s_Var[i] = 0.0; // history of the derivatives (0.0 if constant history)
 }
-"""%{'var': var, 'type': self.types[var]}
+""" % {'var': var, 'type': self.types[var]}
 
         # initalise some variables
         for var in self.vars:
-            code += '\n%s %s;\n'%(self.types[var],\
-                    ', '.join(['k%s%s'%(i, var) for i in [1,2,3,4]]))
-            code += '%s TEMP%s;\n'%(self.types[var], var)
-            code += '%s ERROR%s;\n'%(self.types[var], var)
+            code += '\n%s %s;\n' % (self.types[var],
+                                    ', '.join(['k%s%s' % (i, var) for i in [1, 2, 3, 4]]))
+            code += '%s TEMP%s;\n' % (self.types[var], var)
+            code += '%s ERROR%s;\n' % (self.types[var], var)
 
         code += '//k1 need to be calculated only for the first step\n' +\
                 '//due to the FSAL property k1(n+1)=k4(n)\n'
-        for var in self.vars: 
-            code += '\tk1%s'%var + ' = ' + CEQNSk1[var] + ';\n'
+        for var in self.vars:
+            code += '\tk1%s' % var + ' = ' + CEQNSk1[var] + ';\n'
 
         code += """
 while((t <= tfinal || hitdsc) && SIM_n-nstart <= MaxIter) {
@@ -735,27 +747,32 @@ while((t <= tfinal || hitdsc) && SIM_n-nstart <= MaxIter) {
         # evaluate the equations in each step
         # and set the time correctly (for non-autonomous equations)
         code += '\tt += dt * 0.5;\n'
-        for var in self.vars: 
-            code += '\tk2%s'%var + ' = ' + CEQNSk2[var] + ';\n'
-        code += '\tt += dt * 0.25;\n'
-        for var in self.vars: 
-            code += '\tk3%s'%var + ' = ' + CEQNSk3[var] + ';\n'
         for var in self.vars:
-            code += '\tTEMP%(var)s = pt_%(var)s_ar[SIM_n] + dt * 1.0/9.0 * (2.0*k1%(var)s + 3.0*k2%(var)s + 4.0*k3%(var)s);\n'%{'var': var}
+            code += '\tk2%s' % var + ' = ' + CEQNSk2[var] + ';\n'
         code += '\tt += dt * 0.25;\n'
         for var in self.vars:
-            code += '\tk4%s'%var + ' = '  + CEQNSk4[var] + ';\n'
-            code += '\tERROR%(var)s = dt/72.0 * (-5.0*k1%(var)s + 6.0*k2%(var)s + 8.0*k3%(var)s - 9.0*k4%(var)s);\n'%{'var': var}
+            code += '\tk3%s' % var + ' = ' + CEQNSk3[var] + ';\n'
+        for var in self.vars:
+            code += '\tTEMP%(var)s = pt_%(var)s_ar[SIM_n] + dt * 1.0/9.0 * (2.0*k1%(var)s + 3.0*k2%(var)s + 4.0*k3%(var)s);\n' % {
+                'var': var}
+        code += '\tt += dt * 0.25;\n'
+        for var in self.vars:
+            code += '\tk4%s' % var + ' = ' + CEQNSk4[var] + ';\n'
+            code += '\tERROR%(var)s = dt/72.0 * (-5.0*k1%(var)s + 6.0*k2%(var)s + 8.0*k3%(var)s - 9.0*k4%(var)s);\n' % {
+                'var': var}
 
             if self.debug:
-                code += 'std::cout << "t = " << t << "\tdt = " << dt << "\tk1 = " << k1%(var)s << "\tk2 = " << k2%(var)s << "\tk3 = " << k3%(var)s << "\t k4 = " << k4%(var)s << std::endl;\n'%{'var': var}
-       
+                code += 'std::cout << "t = " << t << "\tdt = " << dt << "\tk1 = " << k1%(var)s << "\tk2 = " << k2%(var)s << "\tk3 = " << k3%(var)s << "\t k4 = " << k4%(var)s << std::endl;\n' % {
+                    'var': var}
+
         code += '\tRelErr = 0.0;\n'
         for var in self.vars:
-            code += '\tERROR%(var)s = ERROR%(var)s/MAX( MAX(ABS%(var)s(pt_%(var)s_ar[SIM_n]), ABS%(var)s(TEMP%(var)s)), thresh);\n\n'%{'var': var}
+            code += '\tERROR%(var)s = ERROR%(var)s/MAX( MAX(ABS%(var)s(pt_%(var)s_ar[SIM_n]), ABS%(var)s(TEMP%(var)s)), thresh);\n\n' % {
+                'var': var}
 
         for var in self.vars:
-            code += '\tRelErr = MAX(RelErr, ABS%(var)s(ERROR%(var)s));\n'%{'var': var}
+            code += '\tRelErr = MAX(RelErr, ABS%(var)s(ERROR%(var)s));\n' % {
+                'var': var}
             if self.debug:
                 code += 'std::cout << "\t RelErr = " << RelErr << "\t RelTol = " << RelTol << std::endl;\n'
 
@@ -763,14 +780,16 @@ while((t <= tfinal || hitdsc) && SIM_n-nstart <= MaxIter) {
 
         for var in self.vars:
             if var in self.noise:
-                code += '\t\tpt_%(var)s_ar[SIM_n+1] = TEMP%(var)s + sqrt(dt) * ( %(noise)s );\n'%{'var': var, 'noise': CNOISE[var]}+\
-                        '\t\tpt_%(var)s_Var[SIM_n+1] = k4%(var)s;\n'%{'var': var}
+                code += '\t\tpt_%(var)s_ar[SIM_n+1] = TEMP%(var)s + sqrt(dt) * ( %(noise)s );\n' % {'var': var, 'noise': CNOISE[var]} +\
+                        '\t\tpt_%(var)s_Var[SIM_n+1] = k4%(var)s;\n' % {
+                    'var': var}
             else:
-                code += '\t\tpt_%(var)s_ar[SIM_n+1] = TEMP%(var)s;\n\t\tpt_%(var)s_Var[SIM_n+1] = k4%(var)s;\n'%{'var': var}
-            code += '\t\tk1%(var)s = k4%(var)s; //FSAL\n'%{'var': var}
+                code += '\t\tpt_%(var)s_ar[SIM_n+1] = TEMP%(var)s;\n\t\tpt_%(var)s_Var[SIM_n+1] = k4%(var)s;\n' % {
+                    'var': var}
+            code += '\t\tk1%(var)s = k4%(var)s; //FSAL\n' % {'var': var}
 
         code +=\
-        """
+            """
         pt_t_ar[SIM_n+1] = t;
         SIM_n++;
         if(SIM_n - nstart > MaxIter) {
@@ -835,7 +854,7 @@ while((t <= tfinal || hitdsc) && SIM_n-nstart <= MaxIter) {
 
         for var in self.vars:
             code +=\
-            """
+                """
         %(type)s *p%(var)s;
         p%(var)s = (%(type)s *) realloc(pt_%(var)s_ar, (SIM_size) * sizeof(%(type)s));
         if (!p%(var)s) {
@@ -850,7 +869,7 @@ while((t <= tfinal || hitdsc) && SIM_n-nstart <= MaxIter) {
             exit(1);
         } 
         pt_%(var)s_Var = p%(var)s;
-            """%{'var': var, 'type': self.types[var]}
+            """ % {'var': var, 'type': self.types[var]}
 
         code += """
     }
@@ -866,7 +885,7 @@ else
 
         for var in self.vars:
             code +=\
-            """
+                """
 %(type)s *p%(var)s;
 p%(var)s = (%(type)s *) realloc(pt_%(var)s_ar, (SIM_n) * sizeof(%(type)s));
 if (!p%(var)s) 
@@ -880,10 +899,10 @@ if (!p%(var)s)
 else
     pt_%(var)s_Var = p%(var)s;
 
-            """%{'var': var, 'type': self.types[var]}
+            """ % {'var': var, 'type': self.types[var]}
 
         code +=\
-        """
+            """
 #ifndef MANUAL
 PyObject *erg;
 erg = PyDict_New();
@@ -907,7 +926,7 @@ Py_DECREF(myarray);
 
         for var in self.vars:
             code +=\
-            """
+                """
 PyObject *myarray_%(var)s;
 //PyObject *myarray_V%(var)s;
 %(type)s *array_buf%(var)s; 
@@ -949,10 +968,10 @@ for(i = 0; i < SIM_n; i++)
     std:: cout << pt_t_ar[i] << "\t" << %s << std::endl;
     return 0;
 }
-"""%(' << "\t" << '.join(['pt_%s_ar[i]'%var for var in self.vars]))
+""" % (' << "\t" << '.join(['pt_%s_ar[i]' % var for var in self.vars]))
 
-        includes=\
-        """
+        includes =\
+            """
 /****** uncomment the following line to run generated source code directly ***************/
 // #define MANUAL
 
@@ -994,33 +1013,33 @@ long unsigned int SIM_n;
 long unsigned int SIM_size;
 """
 
-        for var in self.vars: 
+        for var in self.vars:
             if self.types[var] == 'double':
                 absfun = 'fabs'
             else:
                 absfun = 'abs'
-            includes += '#define ABS%s(X) (%s(X))\n'%(var, absfun)
+            includes += '#define ABS%s(X) (%s(X))\n' % (var, absfun)
 
         includes += '\n/* positions of lags in the arrays */\n'
         for dhash in self.delayhashs:
-            includes += 'long unsigned int n_%s;\n'%dhash
+            includes += 'long unsigned int n_%s;\n' % dhash
         includes += '/* arrays holding the variabls */\n'
         for var in self.vars:
-            includes += '%s *pt_%s_ar;\n'%(self.types[var], var)
-            includes += '%s *pt_%s_Var;\n'%(self.types[var], var)
+            includes += '%s *pt_%s_ar;\n' % (self.types[var], var)
+            includes += '%s *pt_%s_Var;\n' % (self.types[var], var)
 
         for var in self.vars:
             includes +=\
-            """
+                """
 inline %(vartype)s hermite_%(var)s(const double &, const double &, const %(vartype)s &, const %(vartype)s &, 
                                                    const double &, const %(vartype)s &, const %(vartype)s &);
 inline %(vartype)s dt_hermite_%(var)s(const double &, const double &, const %(vartype)s &, const %(vartype)s &, 
                                                    const double &, const %(vartype)s &, const %(vartype)s &);\n
 
-            """%{'var': var, 'vartype': self.types[var]}
+            """ % {'var': var, 'vartype': self.types[var]}
 
-        tempcode=\
-        """
+        tempcode =\
+            """
 %(vartype)s interp_%(var)s(double t, long unsigned int *n0) 
 {
     while(pt_t_ar[*n0+1] < t)
@@ -1066,10 +1085,10 @@ inline %(vartype)s dt_hermite_%(var)s(const double &t, const double &tn, const %
         """
 
         for var in self.vars:
-            includes += tempcode%{'var': var, 'vartype': self.types[var]}
+            includes += tempcode % {'var': var, 'vartype': self.types[var]}
         includes += self.supportcode
 
-        #include source for Gaussian white noise:
+        # include source for Gaussian white noise:
         gwn = False
         for line in self.noise.values():
             if 'gwn' in line:
@@ -1078,15 +1097,15 @@ inline %(vartype)s dt_hermite_%(var)s(const double &t, const double &tn, const %
             includes += gwn_code
 
         self.includes = includes
-        code += '\n// This hash is included to detect a change in\n'+\
-                '// the support code and recompile in this case\n'+\
-                '// %s\n'%hashlib.md5(includes).hexdigest()
+        code += '\n// This hash is included to detect a change in\n' +\
+                '// the support code and recompile in this case\n' +\
+                '// %s\n' % hashlib.md5(includes).hexdigest()
         self.code = code
         self.code_manu = (code
-            .replace("%CODE_MANU_1%", code_manu_1)
-            .replace("%CODE_MANU_2%", code_manu_2)
-            .replace("%CODE_MANU_3%", code_manu_3)
-        )
+                          .replace("%CODE_MANU_1%", code_manu_1)
+                          .replace("%CODE_MANU_2%", code_manu_2)
+                          .replace("%CODE_MANU_3%", code_manu_3)
+                          )
 
     def output_ccode(self):
         txt = ''
@@ -1099,7 +1118,7 @@ inline %(vartype)s dt_hermite_%(var)s(const double &t, const double &tn, const %
         """run the simulation"""
         # get the parameters for the simulation into the local variables
         # so that they can be given to the c extension
-        if not self.__hist_set: 
+        if not self.__hist_set:
             sys.stderr.write("""Warning: The history has not been set at all or not been set 
             with the functions hist_from_arrays or hist_from_funcs. Please don't access the 
             history arrays directly.\n""")
@@ -1107,51 +1126,55 @@ inline %(vartype)s dt_hermite_%(var)s(const double &t, const double &tn, const %
         nstart = self._nstart
 
         for prm in self.params:
-            exec('PAR%s=%s'%(prm, self.params[prm]))
+            exec('PAR%s=%s' % (prm, self.params[prm]))
 
         for prm in self.simul:
-            exec('%s=%s'%(prm, self.simul[prm]))
-        
+            exec('%s=%s' % (prm, self.simul[prm]))
+
         for var in self.vars:
-            exec('hist%s_ar  = self.hist["%s"]'%(var, var))
-            exec('Vhist%s_ar = self.Vhist["%s"]'%(var, var))
+            exec('hist%s_ar  = self.hist["%s"]' % (var, var))
+            exec('Vhist%s_ar = self.Vhist["%s"]' % (var, var))
 
         Thist_ar = self.hist['t']
         chunk = self.chunk
 
-        discont= self.discont
+        discont = self.discont
         NumOfDiscont = len(discont)
         RSEED = self.rseed
 
         self.sol = weave.inline(self.code,
-                            ['PAR%s'%p for p in self.params] +\
-                            ['hist%s_ar'%var for var in self.vars] +\
-                            ['Vhist%s_ar'%var for var in self.vars] +\
-                            ['Thist_ar', 'dtmin', 'dtmax',\
-                            'dt0', 'tfinal', 'RelTol', 'discont', 'NumOfDiscont',\
-                            'AbsTol', 'nstart', 'chunk', 'MaxIter', 'RSEED'],
-                   support_code=self.includes,
-                   verbose=0,
-                   compiler = 'gcc')
+                                ['PAR%s' % p for p in self.params] +
+                                ['hist%s_ar' % var for var in self.vars] +
+                                ['Vhist%s_ar' % var for var in self.vars] +
+                                ['Thist_ar', 'dtmin', 'dtmax',
+                                    'dt0', 'tfinal', 'RelTol', 'discont', 'NumOfDiscont',
+                                    'AbsTol', 'nstart', 'chunk', 'MaxIter', 'RSEED'],
+                                support_code=self.includes,
+                                verbose=0,
+                                compiler='gcc')
 
         for var in self.vars:
             if self.types[var] == 'Complex':
                 try:
-                    self.spline_tck[var+'real'] = splrep(self.sol['t'], self.sol[var].real)
-                    self.spline_tck[var+'imag'] = splrep(self.sol['t'], self.sol[var].imag)
+                    self.spline_tck[var +
+                                    'real'] = splrep(self.sol['t'], self.sol[var].real)
+                    self.spline_tck[var +
+                                    'imag'] = splrep(self.sol['t'], self.sol[var].imag)
                 except:
-                    sys.stderr.write('Error: Scipy could not calculate spline for variable %s.\n'%var)
+                    sys.stderr.write(
+                        'Error: Scipy could not calculate spline for variable %s.\n' % var)
                     sys.stderr.flush()
             else:
                 try:
                     self.spline_tck[var] = splrep(self.sol['t'], self.sol[var])
                 except:
-                    sys.stderr.write('Error: Scipy could not calculate spline for variable %s.\n'%var)
+                    sys.stderr.write(
+                        'Error: Scipy could not calculate spline for variable %s.\n' % var)
                     sys.stderr.flush()
 
-    def sol_spl(self, t): 
+    def sol_spl(self, t):
         """Sample the solutions at times `t`.
-        
+
         `t`
             Array of time points on which to sample the solution.
 
@@ -1161,14 +1184,15 @@ inline %(vartype)s dt_hermite_%(var)s(const double &t, const double &tn, const %
         erg = {'t': t}
         for var in self.vars:
             if self.types[var] == 'Complex':
-                erg[var] = splev(t, self.spline_tck[var+'real']) + 1.0j*splev(t, self.spline_tck[var+'imag']) 
+                erg[var] = splev(t, self.spline_tck[var+'real']) + \
+                    1.0j*splev(t, self.spline_tck[var+'imag'])
             else:
                 erg[var] = splev(t, self.spline_tck[var])
         return erg
 
     def sample(self, tstart=None, tfinal=None, dt=None):
         """Sample the solution with `dt` steps between `tstart` and `tfinal`.
-        
+
         `tstart`, `tfinal`
             Start and end value of the interval to sample.
             If nothing is specified `tstart` is set to zero
@@ -1191,6 +1215,7 @@ inline %(vartype)s dt_hermite_%(var)s(const double &t, const double &tn, const %
         erg = self.sol_spl(t)
         return erg
 
+
 if __name__ == '__main__':
     eqns = {'y1': '- y1 * y2(t-1.0) + y2(t-tau2)',
             'y2': 'y1 * y2(t-tau1) - y2',
@@ -1206,7 +1231,7 @@ if __name__ == '__main__':
         'y1': lambda x: 5.0,
         'y2': lambda x: 0.1,
         'y3': lambda x: 1.1
-        }
+    }
 
     dde.hist_from_funcs(initfuncs)
     dde.run()
@@ -1217,11 +1242,11 @@ if __name__ == '__main__':
     y1 = dde.sol['y1']
     y2 = dde.sol['y2']
     y3 = dde.sol['y3']
-    pl.plot(t,y1, 'rx')
-    pl.plot(t,y2, 'gx')
-    pl.plot(t,y3, 'bx')
-    
-    tspl=np.linspace(0,100, 10000)
+    pl.plot(t, y1, 'rx')
+    pl.plot(t, y2, 'gx')
+    pl.plot(t, y3, 'bx')
+
+    tspl = np.linspace(0, 100, 10000)
 
     sol = dde.sample(dt=0.2)
 
