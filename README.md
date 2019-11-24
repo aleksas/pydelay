@@ -19,7 +19,9 @@ python setup.py install
 
 # install pydelay using windows 
 
-Install Visual Studio 2017 & Visual Studio C++ Build Tool 2015 at http://landinghub.visualstudio.com/visual-cpp-build-tools
+Install Visual Studio 2017 & Visual Studio C++ Build Tool 2015 at
+
+http://landinghub.visualstudio.com/visual-cpp-build-tools
 
 Update Conda
 
@@ -53,6 +55,8 @@ P.S. The solution for the issue: Cannot build msvcr library: "vcruntime140d.dll"
 
 Copy vcruntime140d.dll from C:\Windows\System32 to any folder, which is reachable in the path in the advanced system settings/environment variables/ system variables.
 
-For more details on windows installation refer to https://stackoverflow.com/questions/34363477/pystan-compileerror-command-gcc-failed-with-exit-status-1-windows?rq=1
+For more details on windows installation refer to the following link:
+
+https://stackoverflow.com/questions/34363477/pystan-compileerror-command-gcc-failed-with-exit-status-1-windows?rq=1
 
  enjoy !!
