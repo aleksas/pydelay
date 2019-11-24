@@ -53,4 +53,6 @@ P.S. The solution for the issue: Cannot build msvcr library: "vcruntime140d.dll"
 
 Copy vcruntime140d.dll from C:\Windows\System32 to any folder, which is reachable in the path in the advanced system settings/environment variables/ system variables.
 
+For more details on windows installation refer to https://stackoverflow.com/questions/34363477/pystan-compileerror-command-gcc-failed-with-exit-status-1-windows?rq=1
+
  enjoy !!
