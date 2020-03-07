@@ -222,14 +222,12 @@ class dde23:
                 try:
                     vname, vartype = vardef.split(':')
                 except:
-                    raise AssertionError,\
-                        '%s is not a valid variable definition. Use "varname" or "varname:C"' % vardef
+                    raise AssertionError('%s is not a valid variable definition. Use "varname" or "varname:C"' % vardef)
                 if vartype in ['C', 'c']:
                     self.nptypes[vname] = 'NPY_CDOUBLE'
                     self.types[vname] = 'Complex'
                 else:
-                    raise AssertionError,\
-                        'Unknown type in variable definition "%s"' % vardef
+                    raise AssertionError('Unknown type in variable definition "%s"' % vardef)
                 self.vars.append(vname)
             else:
                 self.types[vardef] = 'double'
@@ -523,8 +521,8 @@ class dde23:
             try:
                 delval = -eval(s)
             except:
-                raise AssertionError, """Error: The delay term "%s" is an undefined expression. 
-                (State and time dependent delays are not yet supported.)""" % delay
+                raise AssertionError("""Error: The delay term "%s" is an undefined expression. 
+                (State and time dependent delays are not yet supported.)""" % delay)
             assert delval >= 0, 'Error: The delay term  "%s" is in the future.' % delay
 
             if delval > 0:
@@ -547,8 +545,8 @@ class dde23:
             try:
                 delval = -eval(s)
             except:
-                raise AssertionError, """Error: The delay term "%s" is an undefined expression. 
-                (State and time dependent delays are not yet supported.)""" % delay
+                raise AssertionError("""Error: The delay term "%s" is an undefined expression.
+                (State and time dependent delays are not yet supported.)""" % delay)
             assert delval > 0, """Error: The delay term  "%s" is in the future. 
             Or the eqn involves a derivative term without delay.""" % delay
             self.delays.append(delval)
