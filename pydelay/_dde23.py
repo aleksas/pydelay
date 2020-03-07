@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 from __future__ import division
 from scipy.interpolate import splrep, splev, spalde
-import weave
 import numpy as np
-from helper import _parenthesis_balancedQ, _symbols_allowedQ,\
+from .helper import _parenthesis_balancedQ, _symbols_allowedQ,\
     gen_disconts, gwn_code, assure_array, isrealnum, isnum
 
 
@@ -1140,7 +1139,7 @@ inline %(vartype)s dt_hermite_%(var)s(const double &t, const double &tn, const %
         NumOfDiscont = len(discont)
         RSEED = self.rseed
 
-        self.sol = weave.inline(self.code,
+        """self.sol = weave.inline(self.code,
                                 ['PAR%s' % p for p in self.params] +
                                 ['hist%s_ar' % var for var in self.vars] +
                                 ['Vhist%s_ar' % var for var in self.vars] +
@@ -1149,7 +1148,7 @@ inline %(vartype)s dt_hermite_%(var)s(const double &t, const double &tn, const %
                                     'AbsTol', 'nstart', 'chunk', 'MaxIter', 'RSEED'],
                                 support_code=self.includes,
                                 verbose=0,
-                                compiler='gcc')
+                                compiler='gcc')"""
 
         for var in self.vars:
             if self.types[var] == 'Complex':
